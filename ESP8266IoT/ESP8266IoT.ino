@@ -1,12 +1,12 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
-const char* ssid = "-----";
-const char* password =  "-----";
+const char* ssid = "ssid";
+const char* password =  "password";
 const char* mqttServer = "soldier.cloudmqtt.com";
 const int mqttPort = 14966;
-const char* mqttUser = "-----";
-const char* mqttPassword = "-----";
+const char* mqttUser = "mqttuser";
+const char* mqttPassword = "mqttpass";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -14,7 +14,7 @@ PubSubClient client(espClient);
 void setup() {
 
   pinMode(13, OUTPUT);
-  digitalWrite(13, LOW);
+  digitalWrite(13, HIGH);
   Serial.begin(115200);
 
   WiFi.begin(ssid, password);
@@ -44,37 +44,40 @@ void setup() {
     }
   }
 
-  client.publish("ledSwitch", "Hello from ESP8266");
+  client.publish("welcomeMessage", "Hello from ESP8266");
   client.subscribe("ledSwitch");
+
 
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
 
+  payload[length] = '\0';
+  String message = (char*)payload;
+
+  if (strcmp(topic, "ledSwitch") == 0) {
+    if (message[0] == '1') {
+      digitalWrite(13, LOW);
+    }
+    else if (message[0] == '0') {
+      digitalWrite(13, HIGH);
+    }
+
+  }
+
   Serial.print("Message arrived in topic: ");
   Serial.println(topic);
 
   Serial.print("Message:");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
+  Serial.println(message);
+
+
 
   Serial.println();
   Serial.println("-----------------------");
 
-  // Switch on the LED if an 1 was received as first character
-  if ((char)payload[0] == '1') {
-    digitalWrite(13, HIGH);   // Turn the LED on (Note that LOW is the voltage level
-    // but actually the LED is on; this is because
-    // it is active low on the ESP-01)
-    //client.publish("ledSwitch", "LED is turned on!");
-
-  } else {
-    digitalWrite(13, LOW);  // Turn the LED off by making the voltage HIGH
-    //client.publish("ledSwitch", "LED is turned off!");
-  }
-
 }
+
 
 void loop() {
   client.loop();
