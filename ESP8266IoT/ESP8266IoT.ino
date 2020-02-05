@@ -6,11 +6,11 @@
 #include <EEPROM.h>
 RTC_DS1307 rtc;
 
-const char* ssid = "Redmi a";
-const char* password =  "06012019";
+const char* ssid = "";
+const char* password =  "";
 const char* mqttServer = "mqtt.beebotte.com";
 const int mqttPort = 1883;
-const char* mqttUser = "token_nq0Nher2unrIiXid";
+const char* mqttUser = "";
 const char* mqttPassword = "";
 char json[200];
 
