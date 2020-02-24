@@ -1,42 +1,54 @@
+//Include necessary libraries
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include "RTClib.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <EEPROM.h>
-RTC_DS1307 rtc;
 
+
+RTC_DS1307 rtc; // Object declaration for RTC
+
+
+// WiFi and MQTT Broker credentials
 const char* ssid = "";
 const char* password =  "";
 const char* mqttServer = "mqtt.beebotte.com";
 const int mqttPort = 1883;
 const char* mqttUser = "";
 const char* mqttPassword = "";
-char json[200];
 
 
+char json[200]; // Sample string for incoming JSON data
+
+// Flags for retaining previous plug and timer status
 int lastPlugStatus;
 int lastTimerStatus = 1;
 
+
+// WiFi and MQTT object declaration
 WiFiClient espClient;
 PubSubClient client(espClient);
+
 
 void setup() {
 
   pinMode(13, OUTPUT);
-  //digitalWrite(13, HIGH);
   Serial.begin(115200);
   Wire.begin();
   EEPROM.begin(512);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(ssid, password); //Initiate WiFi
 
+
+  //Check if the module is able to connect to the specified network
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.println("Connecting to WiFi..");
   }
   Serial.println("Connected to the WiFi network");
 
+  //MQTT Setup
   client.setServer(mqttServer, mqttPort);
   client.setCallback(callback);
 
@@ -56,7 +68,7 @@ void setup() {
     }
   }
 
-
+  // RTC Setup
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
     while (1);
@@ -65,15 +77,23 @@ void setup() {
   if (! rtc.isrunning()) {
     Serial.println("RTC is NOT running!");
   }
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));  //Set compilation time as the time for RTC. Comment this line out after setting the time once and reupload the sketch
 
   //EEPROM.put(3, 1);
   //EEPROM.commit();
+
+  /* Read last status of plug and timer from EEPROM if there
+      has been any power outage
+  */
   lastPlugStatus = (int)EEPROM.read(4);
   lastTimerStatus = (int)EEPROM.read(3);
+
+  //Retain last plug status and unsuccessful timer
   retainLastPlugStatus();
   retainLastTimerStatus();
 
+  //Subscribe to topics and publish startup message
   client.publish("Esp8266ioT/messages", "Hello from Smart Plug!");
   client.subscribe("Esp8266ioT/ga");
   client.subscribe("Esp8266ioT/toggle");
@@ -85,14 +105,17 @@ void setup() {
 
 }
 
+
+//This is where everything happens
+//Is called when a message arrives to any subscribed topic
+
 void callback(char* topic, byte* payload, unsigned int length) {
 
-  StaticJsonBuffer<200> jsonBuffer;
-
-  payload[length] = '\0';
-
+  StaticJsonBuffer<200> jsonBuffer;  //Start JSON
+  payload[length] = '\0'; //Remove excess bytes from payload string
 
 
+  //Make another copy of payload in the string JSON[]
   for (int i = 0; i < length; i++) {
     //Serial.print((char)payload[i]);
     json[i] = (char)payload[i];
@@ -100,19 +123,24 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 
 
- 
+  //Check which topic the payload was published to and act accordingly
+
+  // Topic : Esp8266ioT/time  (Timer)
   if (strcmp(topic, "Esp8266ioT/time") == 0) {
     checkTimer(json);
   }
 
 
+  //Topic : Esp8266ioT/ga (Google Assistant)
   if (strcmp(topic, "Esp8266ioT/ga") == 0) {
+
+    //Parse the JSON Object
     JsonObject& root = jsonBuffer.parseObject(json);
-      String data = root["data"];
+    String data = root["data"];
 
     if (data == "1") {
       digitalWrite(13, HIGH);
-      EEPROM.put(4, 1);
+      EEPROM.put(4, 1); // Put the plug status in EEPROM so that it can be retained again after power outage of any sort
       EEPROM.commit();
       lastPlugStatus = (int)EEPROM.read(4);
       client.publish("Esp8266ioT/status", "Plug is ON!");
@@ -130,7 +158,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   String message = (char*)payload;
 
 
-
+  // Topic : Esp8266ioT/toggle (Toggle Switch)
   if (strcmp(topic, "Esp8266ioT/toggle") == 0) {
     if (message == "1") {
       digitalWrite(13, HIGH);
@@ -169,9 +197,10 @@ void loop() {
 
 }
 
-
+// The timer function that handles the timer feature
+// Takes the JSON string as input
 void checkTimer(char *json) {
-  client.publish("Esp8266ioT/messages", "Timer has been set!");
+  client.publish("Esp8266ioT/messages", "Timer has been set!"); //Confirmation message
 
 
   char *hour;
@@ -181,9 +210,12 @@ void checkTimer(char *json) {
 
   json[5] = '\0';
 
+  //Breaks the "hh:mm" formatted string into two parts. One taking the part before ':' and another taking the part after ':'
   hour = strtok(json, delim);
   minute = strtok(NULL, delim);
 
+
+  //Typecasting the hour and minute strings into integers
   int Hour = atoi(hour);
   int Minute = atoi(minute);
 
@@ -191,11 +223,13 @@ void checkTimer(char *json) {
   Serial.print(Hour);
   Serial.print(":");
   Serial.println(Minute);
+
+  //Keeps the set time in EEPROM for reatining afterwards
   EEPROM.put(0, Hour);
   EEPROM.put(1, Minute);
   EEPROM.put(3, 0);
   EEPROM.commit();
-  lastTimerStatus = (int)EEPROM.read(3);
+  lastTimerStatus = (int)EEPROM.read(3); //Flag variable for retaining any unsuccessful timer due to power outage
   int check = (int)EEPROM.read(0);
   int check2 = (int)EEPROM.read(1);
 
@@ -204,11 +238,13 @@ void checkTimer(char *json) {
   Serial.print(":");
   Serial.println(check2);
 
+  //Constantly checks if the current time from the RTC matches the set time
   while (1) {
     DateTime now = rtc.now();
     int hr =  (int)(now.hour());
     int mn = (int)(now.minute());
 
+    //Converts the current and set time into minutes
     int current = (hr * 60) + mn;
     int setTime = (check * 60) + check2;
 
@@ -223,14 +259,17 @@ void checkTimer(char *json) {
     Serial.print(":");
     Serial.println(check2);
 
+    //Checks if the set time has passed already
     if (current > setTime) {
 
       Serial.println("The set time has passed already! ");
       client.publish("Esp8266ioT/messages", "Set time exceeded current time!");
 
-      break;
+      break; //breaks the loop
     }
 
+    //True if the current time matches with the set time
+    //Toggles the plug. Meaning, if the Plug was ON before, this will turn it OFF and vice versa
     if (hr == check && mn == check2) {
       if (lastPlugStatus == 0) {
         digitalWrite(13, HIGH);
@@ -252,7 +291,7 @@ void checkTimer(char *json) {
 
       }
     }
-    yield();
+    yield();  //EXTREMELY IMPORTANT! This gives the ESP8266 the time to get it's important internal processes to run.
   }
 
 
@@ -261,7 +300,7 @@ void checkTimer(char *json) {
   Serial.print("Wifi status: ");
   Serial.println(WiFi.status());
 
-  reconnect();
+  reconnect();  //Reconnect to WiFi and MQTT
 
   EEPROM.put(3, 1);
   EEPROM.commit();
@@ -276,7 +315,7 @@ void checkTimer(char *json) {
   client.publish("Esp8266ioT/messages", "Toggle successful!");
 }
 
-
+//Function to reconnect to WiFi and MQTT Broker
 void reconnect() {
 
   WiFi.begin(ssid, password);
@@ -316,6 +355,8 @@ void reconnect() {
 
 }
 
+
+//Function to retain last plug status after every restart
 void retainLastPlugStatus() {
 
   if (lastPlugStatus == 0) {
@@ -336,7 +377,7 @@ void retainLastPlugStatus() {
 
 }
 
-
+//Function to retain any unsuccessful timer after restart
 void retainLastTimerStatus() {
 
   if (lastTimerStatus == 0) {
